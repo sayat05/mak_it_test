@@ -1,8 +1,13 @@
-import { test } from 'node:test';
+// @rev kc-31
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { getSlots } from '../src/slots.ts';
 import { overlaps, toMinutes } from '../src/time.ts';
 import type { Master, Service } from '../src/types.ts';
+
+const originalNow = process.env.NOW;
+beforeEach(() => { process.env.NOW = '2030-11-18T04:00:00Z'; });
+afterEach(() => { if (originalNow === undefined) delete process.env.NOW; else process.env.NOW = originalNow; });
 
 const day = { from: '10:00', to: '13:00', breaks: [] };
 
@@ -34,6 +39,22 @@ test('getSlots: выходной', () => {
   assert.deepEqual(getSlots(master, cut, '2030-11-23', []), []);
 });
 
-test.todo('getSlots: слот не пересекает перерыв');
-test.todo('getSlots: занятое время не выдаётся, отменённые записи не мешают');
-test.todo('getSlots: прошедшее время не выдаётся');
+
+const booking = {id: 'b', masterId: 'm-1', serviceId: 's-cut', start: '2030-11-18T05:00:00Z', end: '2030-11-18T06:00:00Z', clientPhone: '+77012345678', status: 'active' as const};
+test('getSlots: слот не пересекает перерыв', () => {
+  const m = {...master, schedule: {...master.schedule, mon: {...day, breaks: [{from: '11:00', to: '12:00'}]}}};
+  assert.deepEqual(getSlots(m, cut, '2030-11-18', []), ['10:00', '12:00']);
+});
+test('getSlots: занятое время и уборка не выдаются, отменённые записи не мешают', () => {
+  assert.deepEqual(getSlots(master, cut, '2030-11-18', [booking]), ['11:15', '11:30', '11:45', '12:00']);
+  assert.equal(getSlots(master, cut, '2030-11-18', [{...booking, status: 'cancelled'}]).length, 9);
+  assert.equal(getSlots(master, cut, '2030-11-18', [{...booking, masterId: 'other'}]).length, 9);
+});
+test('getSlots: прошедшее время и текущий момент не выдаются', () => {
+  process.env.NOW = '2030-11-18T06:00:00Z';
+  assert.deepEqual(getSlots(master, cut, '2030-11-18', []), ['11:15', '11:30', '11:45', '12:00']);
+});
+test('getSlots: новая запись оставляет уборку перед существующей', () => {
+  const future = {...booking, start: '2030-11-18T06:00:00Z', end: '2030-11-18T07:00:00Z'};
+  assert.ok(!getSlots(master, cut, '2030-11-18', [future]).includes('10:00'));
+});
